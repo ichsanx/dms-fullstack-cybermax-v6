@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:15
+    container_name: dms_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: dms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    container_name: dms_backend
+    restart: always
+    depends_on:
+      - db
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/dms_db
+      JWT_SECRET: your_super_secret_key
+      PORT: 3000
+      NODE_ENV: production
+    command: sh -c "npx prisma migrate deploy && node dist/main"
+
+volumes:
+  postgres_data:

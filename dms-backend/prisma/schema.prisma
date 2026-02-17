@@ -1,0 +1,96 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+model User {
+  id                 String              @id @default(uuid())
+  email              String              @unique
+  password           String
+  role               Role                @default(USER)
+  documents          Document[]
+  permissionRequests PermissionRequest[]
+  notifications      Notification[]
+  createdAt          DateTime            @default(now())
+}
+
+model Document {
+  id           String         @id @default(uuid())
+  title        String
+  description  String?
+  documentType String
+  fileUrl      String
+  version      Int            @default(1)
+  status       DocumentStatus @default(ACTIVE)
+
+  createdById  String
+  createdBy    User           @relation(fields: [createdById], references: [id])
+
+  permissionRequests PermissionRequest[]
+  createdAt          DateTime @default(now())
+
+  @@index([createdById])
+}
+
+model PermissionRequest {
+  id            String         @id @default(uuid())
+  type          PermissionType
+  status        RequestStatus  @default(PENDING)
+
+  documentId    String
+  document      Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  requestedById String
+  requestedBy   User           @relation(fields: [requestedById], references: [id])
+
+  // ✅ simpan file baru untuk REPLACE request
+  replaceFileUrl String?
+
+  createdAt     DateTime       @default(now())
+
+  @@index([documentId])
+  @@index([requestedById])
+  @@index([status])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  message   String
+  isRead    Boolean  @default(false)
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum DocumentStatus {
+  ACTIVE
+  PENDING_DELETE
+  PENDING_REPLACE
+}
+
+enum PermissionType {
+  DELETE
+  REPLACE
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
