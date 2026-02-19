@@ -50,6 +50,12 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+export function buildFileHref(fileUrl?: string) {
+  if (!fileUrl) return "";
+  if (fileUrl.startsWith("http")) return fileUrl;
+  return `${API_BASE_URL}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
+}
+
 /** ======================
  * AUTH
  * ====================== */
@@ -75,9 +81,17 @@ export type User = { id: string; email: string; role?: string };
 export type DocumentItem = {
   id: string;
   title: string;
+  description?: string;
+  documentType?: string;
+
   fileUrl: string;
+
+  version?: number; // ✅ penting untuk bukti replace
   status?: string;
+
   createdAt?: string;
+  updatedAt?: string;
+
   createdBy?: User;
 };
 
@@ -88,6 +102,14 @@ export type Paginated<T> = {
   limit?: number;
 };
 
+// helper biar backend boleh return array / paginated
+function normalizePaginated<T>(res: any): Paginated<T> {
+  if (Array.isArray(res)) return { items: res };
+  if (res?.items && Array.isArray(res.items)) return res as Paginated<T>;
+  // fallback
+  return { items: [] };
+}
+
 export async function listDocuments(opts?: { q?: string; page?: number; limit?: number }) {
   const params = new URLSearchParams();
   if (opts?.q) params.set("q", opts.q);
@@ -96,7 +118,8 @@ export async function listDocuments(opts?: { q?: string; page?: number; limit?: 
 
   const qs = params.toString();
   const path = qs ? `/documents?${qs}` : "/documents";
-  return apiFetch<Paginated<DocumentItem>>(path);
+  const res = await apiFetch<any>(path);
+  return normalizePaginated<DocumentItem>(res);
 }
 
 export async function uploadDocument(payload: {
@@ -107,7 +130,7 @@ export async function uploadDocument(payload: {
 }) {
   const form = new FormData();
   form.append("title", payload.title);
-  form.append("documentType", payload.documentType || "GENERAL"); // ✅ default aman
+  form.append("documentType", payload.documentType || "GENERAL");
   if (payload.description) form.append("description", payload.description);
   form.append("file", payload.file);
 

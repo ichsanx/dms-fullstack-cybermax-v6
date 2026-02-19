@@ -9,12 +9,13 @@ import { PrismaService } from './prisma/prisma.service';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
-// Load env PASTI dari file .env di root dms-backend
+  // ✅ Load env PASTI dari file .env di root dms-backend (works for src & dist)
   dotenv.config({
-    path: join(__dirname, '..', '.env'), // aman untuk src dan dist
+    path: join(__dirname, '..', '.env'),
     override: true,
   });
 
+  // ✅ Log masked DATABASE_URL (untuk debug aman)
   const db = process.env.DATABASE_URL || '';
   const masked = db.replace(/\/\/([^:]+):([^@]+)@/, '//$1:***@');
   console.log('BACKEND CWD =', process.cwd());
@@ -23,13 +24,28 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // (Opsional tapi bagus) Enable CORS untuk kebutuhan frontend / Swagger
+  // ✅ CORS (wajib untuk FE port 3001)
+  // Catatan: kalau FE pindah port (misal 3002), tambahkan di list origin
+  const allowedOrigins = new Set([
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+  ]);
+
   app.enableCors({
-    origin: true,
+    origin: (origin, cb) => {
+      // allow server-to-server / curl / postman (origin undefined)
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.has(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Global validation
+  // ✅ Global validation
   app.useGlobalPipes(
     new ValidationPipe({
       transform: true,
@@ -38,14 +54,14 @@ async function bootstrap() {
     }),
   );
 
-  // Pastikan folder uploads ada
+  // ✅ Ensure uploads folder exists (di root project yang jalan)
   const uploadsDir = join(process.cwd(), 'uploads');
   if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true });
 
-  // Serve static uploads
+  // ✅ Serve static uploads
   app.useStaticAssets(uploadsDir, { prefix: '/uploads' });
 
-  // Swagger setup: http://localhost:3000/docs
+  // ✅ Swagger: http://localhost:3000/docs
   const swaggerConfig = new DocumentBuilder()
     .setTitle('DMS API')
     .setDescription('Document Management System API Documentation')
@@ -58,12 +74,10 @@ async function bootstrap() {
 
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('docs', app, swaggerDocument, {
-    swaggerOptions: {
-      persistAuthorization: true, // biar token tidak hilang saat refresh
-    },
+    swaggerOptions: { persistAuthorization: true },
   });
 
-  // Prisma shutdown hooks (Prisma v6)
+  // ✅ Prisma shutdown hooks (Prisma v6)
   const prisma = app.get(PrismaService);
   await prisma.enableShutdownHooks(app);
 

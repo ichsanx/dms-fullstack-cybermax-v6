@@ -5,6 +5,13 @@ import { LoginDto } from './dto/login.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 
+type SafeUser = {
+  id: string;
+  email: string;
+  role: any;
+  createdAt: Date;
+};
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -12,9 +19,28 @@ export class AuthService {
     private jwt: JwtService,
   ) {}
 
+  private toSafeUser(user: any): SafeUser {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt,
+    };
+  }
+
+  private signToken(user: { id: string; email: string; role: any }) {
+    return this.jwt.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+  }
+
   async register(dto: RegisterDto) {
+    const email = dto.email?.trim().toLowerCase();
+
     const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email },
       select: { id: true },
     });
 
@@ -24,26 +50,29 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        email: dto.email,
+        email,
         password: passwordHash,
       },
       select: { id: true, email: true, role: true, createdAt: true },
     });
 
+    const accessToken = this.signToken(user);
+
+    // ✅ token alias biar FE gak rewel beda nama field
     return {
       user,
-      accessToken: this.jwt.sign({ sub: user.id, email: user.email, role: user.role }),
+      accessToken,
+      access_token: accessToken,
+      token: accessToken,
     };
-
-    
-    const payload = { sub: user.id, email: user.email, role: user.role };
-
-
   }
 
   async login(dto: LoginDto) {
+    const email = dto.email?.trim().toLowerCase();
+
     const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+      where: { email },
+      select: { id: true, email: true, role: true, createdAt: true, password: true },
     });
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
@@ -51,9 +80,14 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.password);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
 
+    const safeUser = this.toSafeUser(user);
+    const accessToken = this.signToken(user);
+
     return {
-      user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt },
-      accessToken: this.jwt.sign({ sub: user.id, email: user.email, role: user.role }),
+      user: safeUser,
+      accessToken,
+      access_token: accessToken,
+      token: accessToken,
     };
   }
 }
