@@ -4,32 +4,26 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
+  buildFileHref,
   listDocuments,
   uploadDocument,
   requestDelete,
   requestReplace,
-  buildFileHref,
   type DocumentItem,
 } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
-function fmtDate(v?: string) {
-  if (!v) return "-";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return v;
-  return new Intl.DateTimeFormat("id-ID", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(d);
+function shortId(id: string) {
+  if (!id) return "";
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 5)}...${id.slice(-4)}`;
 }
 
-function shortId(id?: string) {
-  if (!id) return "";
-  return id.length <= 10 ? id : `${id.slice(0, 8)}…`;
+function fmtDate(iso?: string) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
 }
 
 export default function DocumentsPage() {
@@ -38,10 +32,6 @@ export default function DocumentsPage() {
   const [items, setItems] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-
-  // Search & view options
-  const [q, setQ] = useState("");
-  const [onlyLatestByTitle, setOnlyLatestByTitle] = useState(false);
 
   // Upload
   const [title, setTitle] = useState("");
@@ -52,62 +42,44 @@ export default function DocumentsPage() {
   const [replaceTargetId, setReplaceTargetId] = useState("");
   const [replaceFile, setReplaceFile] = useState<File | null>(null);
 
+  // Search + Pagination
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit] = useState(10);
+  const [total, setTotal] = useState<number | undefined>(undefined);
+
+  // UX
   const [copied, setCopied] = useState<string>("");
+  const [onlyLatestByTitle, setOnlyLatestByTitle] = useState(true);
 
   useEffect(() => {
     if (!getToken()) return r.replace("/login");
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page]);
 
-  const viewItems = useMemo(() => {
-    const sorted = [...items].sort((a, b) => {
-      const ta = new Date(a.createdAt || 0).getTime();
-      const tb = new Date(b.createdAt || 0).getTime();
-      return tb - ta;
-    });
+  const shownItems = useMemo(() => {
+    if (!onlyLatestByTitle) return items;
 
-    if (!onlyLatestByTitle) return sorted;
-
-    // group by title -> pick latest by (version desc, createdAt desc)
+    // Ambil dokumen terbaru per title (berdasarkan version terbesar)
     const map = new Map<string, DocumentItem>();
-    for (const d of sorted) {
-      const key = (d.title || "").trim() || d.id;
-      const prev = map.get(key);
-      if (!prev) {
-        map.set(key, d);
-        continue;
-      }
-      const dv = d.version ?? 1;
-      const pv = prev.version ?? 1;
-      if (dv > pv) {
-        map.set(key, d);
-        continue;
-      }
-      if (dv === pv) {
-        const dt = new Date(d.createdAt || 0).getTime();
-        const pt = new Date(prev.createdAt || 0).getTime();
-        if (dt > pt) map.set(key, d);
-      }
+    for (const d of items) {
+      const key = d.title || d.id;
+      const cur = map.get(key);
+      const v = d.version ?? 0;
+      const curV = cur?.version ?? 0;
+      if (!cur || v > curV) map.set(key, d);
     }
-    return Array.from(map.values()).sort((a, b) => {
-      const ta = new Date(a.createdAt || 0).getTime();
-      const tb = new Date(b.createdAt || 0).getTime();
-      return tb - ta;
-    });
+    return Array.from(map.values());
   }, [items, onlyLatestByTitle]);
-
-  const replaceTargets = useMemo(() => {
-    // biasanya target replace itu yang ACTIVE
-    return viewItems.filter((d) => (d.status || "ACTIVE") === "ACTIVE");
-  }, [viewItems]);
 
   async function refresh() {
     setErr("");
     setLoading(true);
     try {
-      const res = await listDocuments({ q: q.trim() || undefined });
+      const res = await listDocuments({ q: q.trim() || undefined, page, limit });
       setItems(res.items ?? []);
+      setTotal(res.total);
     } catch (e: any) {
       if (e?.status === 401) return r.replace("/login");
       setErr(
@@ -143,12 +115,16 @@ export default function DocumentsPage() {
     }
   }
 
-  async function onRequestDelete(docId: string) {
-    if (!confirm("Request Delete? (butuh admin approve)")) return;
+  async function onRequestDelete(d: DocumentItem) {
+    if ((d.status || "").includes("PENDING"))
+      return alert("Dokumen ini sedang pending. Tunggu approval selesai.");
+
+    if (!confirm(`Request Delete?\n\n${d.title} (v${d.version ?? 1})\nID: ${d.id}`))
+      return;
 
     setErr("");
     try {
-      await requestDelete(docId);
+      await requestDelete(d.id);
       alert("Request delete terkirim. Tunggu admin approve.");
       await refresh();
     } catch (e: any) {
@@ -192,24 +168,15 @@ export default function DocumentsPage() {
     }
   }
 
-  const Badge = ({ children }: { children: React.ReactNode }) => (
-    <span
-      className="badge"
-      style={{
-        padding: "3px 10px",
-        borderRadius: 999,
-        border: "1px solid rgba(255,255,255,.12)",
-        fontSize: 12,
-        opacity: 0.95,
-      }}
-    >
-      {children}
-    </span>
-  );
+  function onSearch() {
+    setPage(1);
+    refresh();
+  }
 
   return (
     <AppShell title="Documents">
       <div style={{ display: "grid", gap: 14, maxWidth: 980 }}>
+        {/* Upload */}
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between" }}>
             <div>
@@ -237,108 +204,134 @@ export default function DocumentsPage() {
               <option value="PUBLIC">PUBLIC</option>
             </select>
 
-            <input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            <input
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
             <button type="submit">Upload</button>
           </form>
         </div>
 
+        {/* Replace */}
         <div className="card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div>
-              <b>Request Replace</b>
-              <div className="small">Pilih target + file pengganti (butuh admin approve)</div>
-            </div>
-
-            <label className="small" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="checkbox"
-                checked={onlyLatestByTitle}
-                onChange={(e) => setOnlyLatestByTitle(e.target.checked)}
-              />
-              Tampilkan latest per title
-            </label>
+          <b>Request Replace</b>
+          <div className="small">
+            Pilih target + file pengganti (butuh admin approve)
           </div>
 
-          <div style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 520 }}>
-            <select value={replaceTargetId} onChange={(e) => setReplaceTargetId(e.target.value)}>
+          <div style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 700 }}>
+            <select
+              value={replaceTargetId}
+              onChange={(e) => setReplaceTargetId(e.target.value)}
+            >
               <option value="">-- pilih dokumen --</option>
-              {replaceTargets.map((d) => (
+              {shownItems.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.title} v{d.version ?? 1} • {shortId(d.id)} • {d.documentType || "-"}
+                  {d.title} | v{d.version ?? 1} | {d.documentType ?? "-"} |{" "}
+                  {d.status ?? "-"} | {shortId(d.id)}
                 </option>
               ))}
             </select>
 
-            <input type="file" onChange={(e) => setReplaceFile(e.target.files?.[0] ?? null)} />
+            <input
+              type="file"
+              onChange={(e) => setReplaceFile(e.target.files?.[0] ?? null)}
+            />
             <button type="button" onClick={onRequestReplace}>
               Request Replace
             </button>
           </div>
         </div>
 
-        <div className="card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div>
-              <b>Search</b>
-              <div className="small">Cari by q (backend: /documents?q=...)</div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "grid", gap: 10, maxWidth: 520 }}>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Ketik kata kunci, contoh: replace_demo"
-            />
-            <button type="button" onClick={refresh}>
-              Cari / Refresh
-            </button>
-          </div>
-        </div>
-
+        {/* Error */}
         {err && (
           <pre className="card" style={{ whiteSpace: "pre-wrap" }}>
             {err}
           </pre>
         )}
 
+        {/* List */}
         <div className="card">
-          <b>Daftar Dokumen</b>
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <div>
+              <b>Daftar Dokumen</b>
+              <div className="small">
+                Page: {page} • Total: {total ?? "-"}{" "}
+                <label style={{ marginLeft: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={onlyLatestByTitle}
+                    onChange={(e) => setOnlyLatestByTitle(e.target.checked)}
+                    style={{ marginRight: 6 }}
+                  />
+                  Tampilkan latest per title
+                </label>
+              </div>
+            </div>
+
+            <div className="row" style={{ gap: 8 }}>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search title..."
+              />
+              <button type="button" onClick={onSearch}>
+                Search
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+              >
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!!total && page * limit >= total}
+              >
+                Next
+              </button>
+            </div>
+          </div>
 
           {loading ? (
             <div style={{ marginTop: 12 }}>Loading...</div>
-          ) : viewItems.length === 0 ? (
+          ) : shownItems.length === 0 ? (
             <div style={{ marginTop: 12 }} className="small">
               Belum ada dokumen.
             </div>
           ) : (
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
-              {viewItems.map((d) => {
+              {shownItems.map((d) => {
+                const disabledPending = (d.status || "").includes("PENDING");
                 const fileHref = buildFileHref(d.fileUrl);
 
                 return (
                   <div key={d.id} className="card" style={{ padding: 14 }}>
-                    <div className="row" style={{ justifyContent: "space-between", gap: 10 }}>
+                    <div className="row" style={{ justifyContent: "space-between" }}>
                       <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                         <b>{d.title}</b>
-                        <Badge>v{d.version ?? 1}</Badge>
-                        <Badge>{d.documentType || "GENERAL"}</Badge>
+                        <span className="badge">{`v${d.version ?? 1}`}</span>
+                        <span className="badge">{d.documentType ?? "-"}</span>
                       </div>
-                      <Badge>{d.status || "-"}</Badge>
+                      <span className="badge">{d.status || "-"}</span>
                     </div>
 
-                    <div className="small" style={{ marginTop: 6, opacity: 0.95 }}>
+                    <div className="small" style={{ marginTop: 6 }}>
                       ID: <b>{d.id}</b>{" "}
-                      {copied === d.id && <span style={{ color: "var(--ok)" }}>Copied!</span>}
-                      {"  "}•{"  "}
-                      CreatedAt: {fmtDate(d.createdAt)}
+                      {copied === d.id && (
+                        <span style={{ color: "var(--ok)" }}>Copied!</span>
+                      )}
+                      {" • "}
+                      {fmtDate(d.createdAt)}
                     </div>
 
                     <div className="small" style={{ marginTop: 6, opacity: 0.9 }}>
                       FileUrl: {d.fileUrl || "-"}
                     </div>
 
-                    <div className="row" style={{ marginTop: 10, gap: 10, flexWrap: "wrap" }}>
+                    <div className="row" style={{ marginTop: 10 }}>
                       <a href={fileHref} target="_blank" rel="noreferrer">
                         Open file
                       </a>
@@ -347,7 +340,16 @@ export default function DocumentsPage() {
                         Copy ID
                       </button>
 
-                      <button type="button" onClick={() => onRequestDelete(d.id)}>
+                      <button
+                        type="button"
+                        onClick={() => onRequestDelete(d)}
+                        disabled={disabledPending}
+                        title={
+                          disabledPending
+                            ? "Status pending — tunggu approval selesai"
+                            : ""
+                        }
+                      >
                         Request Delete
                       </button>
                     </div>

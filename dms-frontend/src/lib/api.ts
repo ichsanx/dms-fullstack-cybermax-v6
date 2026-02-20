@@ -1,4 +1,4 @@
-// src/lib/api.ts
+// dms-frontend/src/lib/api.ts
 import { clearAuth, getToken } from "@/lib/auth";
 
 export const API_BASE_URL =
@@ -24,7 +24,7 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers || {});
   headers.set("Accept", "application/json");
 
-  // ✅ AUTO attach token (backend tetap butuh Bearer)
+  // Auto attach token (backend butuh Bearer)
   const token = getToken();
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -46,14 +46,21 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
     throw err;
   }
 
-  const body = await readBody(res);
-  return body as T;
+  return (await readBody(res)) as T;
+}
+
+function normalizePaginated<T>(data: any): Paginated<T> {
+  // backend ideal: { items, total, page, limit }
+  // fallback: kalau backend return array langsung
+  if (Array.isArray(data)) return { items: data };
+  if (data?.items && Array.isArray(data.items)) return data as Paginated<T>;
+  return { items: [] };
 }
 
 export function buildFileHref(fileUrl?: string) {
-  if (!fileUrl) return "";
+  if (!fileUrl) return "#";
   if (fileUrl.startsWith("http")) return fileUrl;
-  return `${API_BASE_URL}${fileUrl.startsWith("/") ? "" : "/"}${fileUrl}`;
+  return `${API_BASE_URL}${fileUrl}`;
 }
 
 /** ======================
@@ -83,15 +90,10 @@ export type DocumentItem = {
   title: string;
   description?: string;
   documentType?: string;
-
   fileUrl: string;
-
-  version?: number; // ✅ penting untuk bukti replace
+  version?: number;
   status?: string;
-
   createdAt?: string;
-  updatedAt?: string;
-
   createdBy?: User;
 };
 
@@ -102,15 +104,11 @@ export type Paginated<T> = {
   limit?: number;
 };
 
-// helper biar backend boleh return array / paginated
-function normalizePaginated<T>(res: any): Paginated<T> {
-  if (Array.isArray(res)) return { items: res };
-  if (res?.items && Array.isArray(res.items)) return res as Paginated<T>;
-  // fallback
-  return { items: [] };
-}
-
-export async function listDocuments(opts?: { q?: string; page?: number; limit?: number }) {
+export async function listDocuments(opts?: {
+  q?: string;
+  page?: number;
+  limit?: number;
+}) {
   const params = new URLSearchParams();
   if (opts?.q) params.set("q", opts.q);
   if (opts?.page) params.set("page", String(opts.page));
@@ -118,15 +116,16 @@ export async function listDocuments(opts?: { q?: string; page?: number; limit?: 
 
   const qs = params.toString();
   const path = qs ? `/documents?${qs}` : "/documents";
-  const res = await apiFetch<any>(path);
-  return normalizePaginated<DocumentItem>(res);
+
+  const raw = await apiFetch<any>(path);
+  return normalizePaginated<DocumentItem>(raw);
 }
 
 export async function uploadDocument(payload: {
   title: string;
   file: File;
   description?: string;
-  documentType?: string; // required di backend kamu
+  documentType?: string;
 }) {
   const form = new FormData();
   form.append("title", payload.title);
