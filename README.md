@@ -258,68 +258,168 @@ ADMIN bisa:
 ### 0) Bootstrap Admin (Seed)
 ```mermaid
 flowchart LR
-  Dev[Developer] -->|Run prisma db seed| Seed[Seed Script]
-  Seed -->|Create/Upsert ADMIN| DB[(Database)]
-  DB --> Admin[ADMIN account ready]
+  %% Styles
+  classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
+  classDef process fill:#1f2937,stroke:#94a3b8,color:#fff;
+  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
+  classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
+
+  Dev[Developer]:::actor -->|Run seed| Seed[Prisma Seed]:::process
+  Seed -->|Upsert ADMIN| DB[(Database)]:::db
+  DB --> Admin[ADMIN ready]:::actor
 ```
 
 ### 1) Admin Create User (bukan register publik)
 ```mermaid
-flowchart TD
-  A[ADMIN] -->|Login UI| UI[Frontend UI]
-  UI -->|POST /auth/login| API[Backend API]
-  API -->|JWT access_token| UI
+flowchart LR
+  %% Styles
+  classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
+  classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
+  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
+  classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  A -->|Open Admin Panel - Create User| UI
-  UI -->|POST /users - ADMIN only| API
-  API -->|Hash password + Create USER| DB[(Database)]
-  DB -->|Return user profile| API
+  subgraph ADMIN[Admin]
+    A[ADMIN]:::actor
+  end
+
+  subgraph FE[Frontend UI]
+    UI[Admin Panel]:::ui
+  end
+
+  subgraph BE[Backend API]
+    API[API]:::api
+  end
+
+  DB[(Database)]:::db
+
+  A -->|Login| UI
+  UI -->|POST /auth/login| API
+  API -->|JWT token| UI
+
+  A -->|Create User| UI
+  UI -->|POST /users<br/>ADMIN only| API
+  API -->|Hash + Create user| DB
+  DB -->|User profile| API
   API --> UI
 ```
 
 ### 2) Upload Document
 ```mermaid
-flowchart TD
-  U[USER] -->|Choose file + metadata| UI[Frontend UI]
-  UI -->|POST /documents - multipart JWT| API[Backend API]
-  API -->|Validate - size type| API
-  API -->|Save file| FS[(File Storage)]
-  API -->|Save metadata - fileUrl ownerId etc| DB[(Database)]
-  DB -->|Return document data| API
+flowchart LR
+  %% Styles
+  classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
+  classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
+  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
+  classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
+  classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
+
+  subgraph USER[User]
+    U[USER]:::actor
+  end
+
+  subgraph FE[Frontend UI]
+    UI[Documents Page]:::ui
+  end
+
+  subgraph BE[Backend API]
+    API[API]:::api
+  end
+
+  FS[(File Storage)]:::store
+  DB[(Database)]:::db
+
+  U -->|Choose file| UI
+  UI -->|POST /documents<br/>multipart + JWT| API
+  API -->|Validate size/type| API
+  API -->|Save file| FS
+  API -->|Save metadata| DB
+  DB -->|Document data| API
   API --> UI
 ```
 
 ### 3) Approval — DELETE
 ```mermaid
-flowchart TD
-  U[USER] -->|Request Delete| UI[Frontend UI]
-  UI -->|POST /approvals/delete-request| API[Backend API]
-  API -->|Create Approval: PENDING| DB[(Database)]
+flowchart LR
+  %% Styles
+  classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
+  classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
+  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
+  classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
+  classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  A[ADMIN] -->|Open Approval Queue| UI
+  subgraph USER[User]
+    U[USER]:::actor
+  end
+
+  subgraph ADMIN[Admin]
+    A[ADMIN]:::actor
+  end
+
+  subgraph FE[Frontend UI]
+    UI[UI]:::ui
+  end
+
+  subgraph BE[Backend API]
+    API[API]:::api
+  end
+
+  FS[(File Storage)]:::store
+  DB[(Database)]:::db
+
+  U -->|Request delete| UI
+  UI -->|POST /approvals/delete-request| API
+  API -->|Create approval<br/>PENDING| DB
+
+  A -->|Open queue| UI
   UI -->|POST /approvals/:id/approve| API
 
-  API -->|Delete file + doc| FS[(File Storage)]
-  API -->|Update Approval: APPROVED| DB
-  API -->|Create Notification| DB
-  DB -->|Show In-App Notification| U
+  API -->|Delete file + doc| FS
+  API -->|Update approval<br/>APPROVED| DB
+  API -->|Create notification| DB
+  DB -->|Notify user| U
 ```
 
 ### 4) Approval — REPLACE
 ```mermaid
-flowchart TD
-  U[USER] -->|Request Replace| UI[Frontend UI]
-  UI -->|POST /approvals/replace-request| API[Backend API]
-  API -->|Store new file - pending| FS[(File Storage)]
-  API -->|Create Approval - PENDING| DB[(Database)]
+flowchart LR
+  %% Styles
+  classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
+  classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
+  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
+  classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
+  classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  A[ADMIN] -->|Open Approval Queue| UI
+  subgraph USER[User]
+    U[USER]:::actor
+  end
+
+  subgraph ADMIN[Admin]
+    A[ADMIN]:::actor
+  end
+
+  subgraph FE[Frontend UI]
+    UI[UI]:::ui
+  end
+
+  subgraph BE[Backend API]
+    API[API]:::api
+  end
+
+  FS[(File Storage)]:::store
+  DB[(Database)]:::db
+
+  U -->|Request replace| UI
+  UI -->|POST /approvals/replace-request| API
+  API -->|Store new file<br/>pending| FS
+  API -->|Create approval<br/>PENDING| DB
+
+  A -->|Open queue| UI
   UI -->|POST /approvals/:id/approve| API
 
-  API -->|Update document fileUrl| DB
-  API -->|Update Approval - APPROVED| DB
-  API -->|Create Notification| DB
-  DB -->|Show In-App Notification| U
+  API -->|Update document<br/>fileUrl| DB
+  API -->|Update approval<br/>APPROVED| DB
+  API -->|Create notification| DB
+  DB -->|Notify user| U
 ```
 
 ---
