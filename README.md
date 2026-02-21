@@ -257,7 +257,7 @@ ADMIN bisa:
 
 ### 0) Bootstrap Admin (Seed)
 ```mermaid
-flowchart TD
+flowchart LR
   Dev[Developer] -->|Run prisma db seed| Seed[Seed Script]
   Seed -->|Create/Upsert ADMIN| DB[(Database)]
   DB --> Admin[ADMIN account ready]
@@ -282,6 +282,7 @@ flowchart TD
 flowchart TD
   U[USER] -->|Choose file + metadata| UI[Frontend UI]
   UI -->|POST /documents - multipart JWT| API[Backend API]
+  API -->|Validate - size type| API
   API -->|Save file| FS[(File Storage)]
   API -->|Save metadata - fileUrl ownerId etc| DB[(Database)]
   DB -->|Return document data| API
