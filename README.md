@@ -270,8 +270,8 @@ flowchart TD
   UI -->|POST /auth/login| API[Backend API]
   API -->|JWT access_token| UI
 
-  A -->|Open Admin Panel: Create User| UI
-  UI -->|POST /users (ADMIN only)| API
+  A -->|Open Admin Panel - Create User| UI
+  UI -->|POST /users - ADMIN only| API
   API -->|Hash password + Create USER| DB[(Database)]
   DB -->|Return user profile| API
   API --> UI
@@ -281,9 +281,9 @@ flowchart TD
 ```mermaid
 flowchart TD
   U[USER] -->|Choose file + metadata| UI[Frontend UI]
-  UI -->|POST /documents (multipart, JWT)| API[Backend API]
+  UI -->|POST /documents - multipart JWT| API[Backend API]
   API -->|Save file| FS[(File Storage)]
-  API -->|Save metadata (fileUrl, ownerId, etc.)| DB[(Database)]
+  API -->|Save metadata - fileUrl ownerId etc| DB[(Database)]
   DB -->|Return document data| API
   API --> UI
 ```
@@ -309,14 +309,14 @@ flowchart TD
 flowchart TD
   U[USER] -->|Request Replace| UI[Frontend UI]
   UI -->|POST /approvals/replace-request| API[Backend API]
-  API -->|Store new file (pending)| FS[(File Storage)]
-  API -->|Create Approval: PENDING| DB[(Database)]
+  API -->|Store new file - pending| FS[(File Storage)]
+  API -->|Create Approval - PENDING| DB[(Database)]
 
   A[ADMIN] -->|Open Approval Queue| UI
   UI -->|POST /approvals/:id/approve| API
 
   API -->|Update document fileUrl| DB
-  API -->|Update Approval: APPROVED| DB
+  API -->|Update Approval - APPROVED| DB
   API -->|Create Notification| DB
   DB -->|Show In-App Notification| U
 ```
