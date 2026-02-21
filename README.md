@@ -251,8 +251,9 @@ flowchart LR
   classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  A[ADMIN]:::actor --> UI[Admin Panel]:::ui
-  UI -->|POST /users (ADMIN)| API[Backend API]:::api
+  A["ADMIN"]:::actor --> UI["Admin Panel"]:::ui
+  UI --> R1["POST /users (ADMIN only)"]:::api
+  R1 --> API["Backend API"]:::api
   API --> DB[(Database)]:::db
   DB --> API
   API --> UI
@@ -267,10 +268,11 @@ flowchart LR
   classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  U[USER]:::actor --> UI[Documents Page]:::ui
-  UI -->|POST /documents (multipart + JWT)| API[Backend API]:::api
-  API -->|Validate type/size| API
-  API --> FS[(uploads/)]:::store
+  U["USER"]:::actor --> UI["Documents Page"]:::ui
+  UI --> R1["POST /documents (multipart + JWT)"]:::api
+  R1 --> API["Backend API"]:::api
+  API --> V["Validate type and size"]:::api
+  V --> FS[(uploads)]:::store
   API --> DB[(Database)]:::db
   DB --> API
   API --> UI
@@ -304,14 +306,17 @@ flowchart LR
   classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  U[USER]:::actor --> UI[UI]:::ui
-  UI -->|POST /documents/:id/request-replace (multipart)| API[Backend API]:::api
-  API --> FS[(uploads/)]:::store
+  U["USER"]:::actor --> UI["UI"]:::ui
+  UI --> R1["POST /documents/:id/request-replace (multipart)"]:::api
+  R1 --> API["Backend API"]:::api
+  API --> FS[(uploads)]:::store
   API --> DB[(Database)]:::db
 
-  A[ADMIN]:::actor --> UI
-  UI -->|POST /approvals/requests/:id/approve| API
-  API -->|Update doc + cleanup old file| FS
+  A["ADMIN"]:::actor --> UI
+  UI --> R2["POST /approvals/requests/:id/approve"]:::api
+  R2 --> API
+  API --> C["Update document and cleanup old file"]:::api
+  C --> FS
   API --> DB
 ```
 
