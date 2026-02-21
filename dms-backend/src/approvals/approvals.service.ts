@@ -12,9 +12,28 @@ import {
   Role,
 } from '@prisma/client';
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
 @Injectable()
 export class ApprovalsService {
   constructor(private prisma: PrismaService) {}
+
+  // ===== util: hapus file dari folder uploads dengan aman =====
+  private async safeUnlinkFromUploads(fileUrl?: string | null) {
+    if (!fileUrl) return;
+
+    // fileUrl kamu bentuknya "/uploads/xxxx.ext"
+    const filename = path.basename(fileUrl);
+    const fullPath = path.join(process.cwd(), 'uploads', filename);
+
+    try {
+      await fs.unlink(fullPath);
+    } catch (e: any) {
+      // ignore kalau file memang tidak ada
+      if (e?.code !== 'ENOENT') throw e;
+    }
+  }
 
   async listPending(user: any) {
     if (user.role !== Role.ADMIN) throw new ForbiddenException('Admin only');
@@ -33,6 +52,10 @@ export class ApprovalsService {
    * Approve:
    * - DELETE: hapus Document (cascade akan hapus PermissionRequest terkait)
    * - REPLACE: ambil replaceFileUrl dari PermissionRequest lalu update Document
+   *
+   * Tambahan fix:
+   * - DELETE approved: hapus file fisik document.fileUrl
+   * - REPLACE approved: hapus file fisik LAMA (old fileUrl)
    */
   async approve(user: any, requestId: string) {
     if (user.role !== Role.ADMIN) throw new ForbiddenException('Admin only');
@@ -47,6 +70,10 @@ export class ApprovalsService {
       return { ok: false, message: 'Request already processed' };
     }
     if (!req.document) throw new NotFoundException('Document not found');
+
+    // simpan untuk cleanup setelah transaction sukses
+    const oldFileUrl = req.document.fileUrl;
+    const replaceFileUrl = req.replaceFileUrl;
 
     // ✅ VALIDASI STATUS DOKUMEN (wajib supaya tidak approve request "nyasar")
     if (
@@ -66,7 +93,7 @@ export class ApprovalsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // ====== APPROVE: DELETE ======
       if (req.type === PermissionType.DELETE) {
         await tx.notification.create({
@@ -97,6 +124,8 @@ export class ApprovalsService {
             data: { status: DocumentStatus.ACTIVE },
           });
 
+          // NOTE: kalau ini kejadian, biasanya file replace udah keupload tapi replaceFileUrl null
+          // tidak bisa dibersihkan karena kita tidak tahu filename-nya.
           throw new BadRequestException(
             'replaceFileUrl is missing on PermissionRequest (requestReplace harus menyimpan replaceFileUrl)',
           );
@@ -141,8 +170,29 @@ export class ApprovalsService {
 
       return { ok: true, message: 'Approved' };
     });
+
+    // ===== side-effects setelah transaksi sukses (hapus file fisik) =====
+    if (req.type === PermissionType.DELETE) {
+      await this.safeUnlinkFromUploads(oldFileUrl);
+    }
+
+    if (req.type === PermissionType.REPLACE) {
+      // replace berhasil -> hapus file lama
+      await this.safeUnlinkFromUploads(oldFileUrl);
+      // jangan hapus replaceFileUrl karena itu file yang sekarang dipakai dokumen
+    }
+
+    return result;
   }
 
+  /**
+   * Reject:
+   * - balikkan document.status ke ACTIVE
+   * - request jadi REJECTED
+   *
+   * Tambahan fix:
+   * - jika REPLACE ditolak -> hapus file fisik replaceFileUrl (file pengganti jadi sampah)
+   */
   async reject(user: any, requestId: string) {
     if (user.role !== Role.ADMIN) throw new ForbiddenException('Admin only');
 
@@ -156,6 +206,9 @@ export class ApprovalsService {
       return { ok: false, message: 'Request already processed' };
     }
     if (!req.document) throw new NotFoundException('Document not found');
+
+    // simpan untuk cleanup setelah tx sukses (karena di DB nanti di-null)
+    const replaceFileUrl = req.replaceFileUrl;
 
     // ✅ VALIDASI STATUS DOKUMEN juga saat reject (biar konsisten)
     if (
@@ -175,7 +228,7 @@ export class ApprovalsService {
       );
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       // balikkan status dokumen biar tidak nyangkut
       await tx.document.update({
         where: { id: req.documentId },
@@ -196,5 +249,13 @@ export class ApprovalsService {
 
       return { ok: true, message: 'Rejected' };
     });
+
+    // ===== side-effects setelah transaksi sukses =====
+    if (req.type === PermissionType.REPLACE) {
+      // file pengganti jadi sampah -> hapus
+      await this.safeUnlinkFromUploads(replaceFileUrl);
+    }
+
+    return result;
   }
 }

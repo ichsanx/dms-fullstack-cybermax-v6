@@ -12,7 +12,6 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 
@@ -28,13 +27,12 @@ export class AuthController {
     return res.send();
   }
 
-  @Post('register')
-  @ApiOperation({ summary: 'Register new user' })
-  @ApiBody({ type: RegisterDto })
-  @HttpCode(201)
-  register(@Body() dto: RegisterDto) {
-    return this.auth.register(dto);
-  }
+  /**
+   * ❌ Register publik DIHAPUS
+   * Sesuai requirement: user dibuat oleh ADMIN (misal lewat POST /users) atau lewat seed.
+   *
+   * Kalau FE kamu masih memanggil /auth/register, hapus flow itu di frontend.
+   */
 
   // ✅ Login HARUS 200 biar FE yang strict gak gagal
   @Post('login')
