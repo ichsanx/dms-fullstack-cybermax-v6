@@ -2,13 +2,13 @@
 
 Aplikasi **Document Management System (DMS)** berbasis **Fullstack** yang terdiri dari:
 
-- **Frontend UI (Next.js Web App)**: login, dashboard dokumen (upload & list), request (delete/replace), panel admin (create user & approval queue), notifikasi.
-- **Backend API (NestJS)**: autentikasi JWT, manajemen dokumen, approval workflow, notifikasi.
-- **Database** (Prisma ORM): user, documents, approvals/permission request, notifications.
-- **File Storage**: penyimpanan file dokumen (filesystem lokal; bisa dikembangkan ke S3/MinIO).
+- **Frontend UI (Next.js Web App)**: login, dashboard, documents (upload & list), request delete/replace, panel admin (create user & approval queue), notifikasi.
+- **Backend API (NestJS)**: autentikasi JWT, manajemen dokumen, workflow approval, notifikasi, secure download.
+- **Database (Prisma ORM)**: user, documents, permission requests (approvals), notifications.
+- **File Storage**: filesystem lokal (`uploads/`) — bisa dikembangkan ke S3/MinIO.
 
 > Mode operasional: **Opsi A (Admin membuat user)**  
-> Tidak ada “register publik” dari UI login. Pembuatan user dilakukan oleh **ADMIN**.
+> Tidak ada “register publik”. Pembuatan user dilakukan oleh **ADMIN**.
 
 ---
 
@@ -16,23 +16,36 @@ Aplikasi **Document Management System (DMS)** berbasis **Fullstack** yang terdir
 
 ### Authentication & Authorization
 - Login menggunakan **JWT**
-- **Role-based access**:
-  - `ADMIN`: membuat user, melihat approval queue, approve/reject, eksekusi aksi sensitif.
-  - `USER`: upload dokumen, melihat list dokumen, request delete/replace, menerima notifikasi.
+- **Role-based access**
+  - `ADMIN`: create user, lihat approval queue, approve/reject.
+  - `USER`: upload dokumen, list dokumen miliknya, request delete/replace, menerima notifikasi.
+- **Rate limit login**: 10 request / 3 menit per IP (mengurangi brute force).
 
 ### Document Management
 - Upload dokumen (**multipart/form-data**)
+- **File restriction**: hanya **PDF/DOCX**, max 10MB
 - List dokumen + search + pagination
-- Replace dokumen (via approval admin) → `fileUrl` berubah (dan versi/riwayat bisa ditambah)
+- Replace dokumen (via approval admin) → `fileUrl` berubah, `version` increment
 - Delete dokumen (via approval admin)
 
-### Approval Workflow (PENDING → keputusan → eksekusi)
-- **DELETE**: USER request delete → status **PENDING** → ADMIN approve → dokumen & file terhapus → user notified
-- **REPLACE**: USER request replace → status **PENDING** → ADMIN approve → dokumen di-update (`fileUrl`) → user notified
+### Approval Workflow
+- **DELETE**
+  - USER request delete → document status `PENDING_DELETE`
+  - ADMIN approve → document + file fisik terhapus → user notified
+  - ADMIN reject → status kembali `ACTIVE`
+- **REPLACE**
+  - USER request replace → upload file baru → document status `PENDING_REPLACE`
+  - ADMIN approve → fileUrl diupdate + version increment + file lama dihapus → user notified
+  - ADMIN reject → status kembali `ACTIVE` + file replace (baru) dihapus (cleanup)
 
-### Notification (In-App)
+### Notifications (In-App)
 - Notifikasi disimpan di DB dan ditampilkan di UI
-- Dapat ditingkatkan dengan Outbox + Worker (lihat System Design)
+- Bisa ditingkatkan dengan Outbox + Worker (lihat System Design)
+
+### Secure File Access
+- Folder `uploads/` **tidak di-serve publik**
+- Download file dilakukan via endpoint protected (JWT + authorization):
+  - `GET /documents/:id/download`
 
 ### API Documentation
 - Swagger UI:
@@ -45,14 +58,15 @@ Aplikasi **Document Management System (DMS)** berbasis **Fullstack** yang terdir
 **Backend**
 - NestJS
 - Prisma ORM
-- PostgreSQL (recommended)
+- PostgreSQL
 - JWT Auth
 - Multer (file upload)
+- Throttler (rate limit)
 
 **Frontend**
 - Next.js (App Router)
-- Fetch/Axios untuk akses API
-- UI: Login, Documents, Approvals (Admin), Notifications
+- Fetch API
+- UI: Login, Dashboard, Documents, Users (Admin), Approvals (Admin), Notifications
 
 ---
 
@@ -73,11 +87,10 @@ dms-fullstack-cybermax-v6/
 ---
 
 ## Prasyarat
-
 - Node.js (LTS disarankan)
-- NPM/Yarn/PNPM
-- Database PostgreSQL (atau gunakan Docker)
-- Docker (opsional, recommended untuk setup cepat)
+- NPM
+- PostgreSQL (atau Docker)
+- Docker (opsional)
 
 ---
 
@@ -87,24 +100,18 @@ dms-fullstack-cybermax-v6/
 Buat file: `dms-backend/.env`
 
 ```env
-# App
 PORT=3000
 JWT_SECRET=supersecret
-
-# Database (contoh PostgreSQL)
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/dms?schema=public"
 
-# CORS (origin frontend)
-CORS_ORIGIN="http://localhost:3001"
-
-# Upload directory (filesystem lokal)
-UPLOAD_DIR="uploads"
+# Support multiple origin via koma
+CORS_ORIGIN="http://localhost:3001,http://localhost:3000"
 ```
 
-### Frontend `.env`
-Buat file: `dms-frontend/.env`
+> Folder `uploads/` akan otomatis dibuat saat server start.
 
-> IMPORTANT: Frontend menggunakan **Next.js**, jadi env publik harus diawali `NEXT_PUBLIC_`.
+### Frontend `.env.local`
+Buat file: `dms-frontend/.env.local`
 
 ```env
 NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
@@ -112,59 +119,19 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:3000
 
 ---
 
-## Cara Menjalankan (Recommended: Docker untuk Backend)
-
-> Backend repo sudah menyediakan `docker-compose.yml`.
-
-```bash
-cd dms-backend
-docker compose up -d --build
-docker compose logs -f
-```
-
-Buka:
-- API: `http://localhost:3000`
-- Swagger: `http://localhost:3000/docs`
-
-Frontend (local dev):
-```bash
-cd dms-frontend
-npm install
-npm run dev
-```
-
-Buka UI:
-- `http://localhost:3001`
-
-> Jika FE kamu masih jalan di port 3000, ubah script dev menjadi:
-> `next dev -p 3001`
-> atau sesuaikan CORS_ORIGIN dan README.
-
----
-
-## Cara Menjalankan (Local Dev Tanpa Docker)
+## Cara Menjalankan (Local Dev)
 
 ### 1) Backend
 ```bash
 cd dms-backend
 npm install
-```
-
-Migrasi + generate Prisma:
-```bash
 npx prisma migrate dev
-npx prisma generate
-```
-
-Seed admin pertama:
-```bash
 npx prisma db seed
-```
-
-Run backend:
-```bash
 npm run start:dev
 ```
+
+Swagger:
+- `http://localhost:3000/docs`
 
 ### 2) Frontend
 ```bash
@@ -173,18 +140,21 @@ npm install
 npm run dev
 ```
 
+UI:
+- `http://localhost:3001`
+
 ---
 
-## Bootstrap Admin (Seed) — Wajib untuk Opsi A
+## Bootstrap Admin (Seed) — Wajib (Opsi A)
 
-Karena **tidak ada register publik**, admin pertama dibuat via seed (sekali di awal).
+Karena **tidak ada register publik**, admin pertama dibuat via seed.
 
 Contoh kredensial (sesuaikan dengan `dms-backend/prisma/seed.ts`):
 - Email: `admin@mail.com`
 - Password: `Admin123!`
 
 Setelah login sebagai admin, pembuatan user dilakukan lewat:
-- **Admin Panel (UI)**, atau
+- **UI**: menu `Users (Admin)` → `/users`, atau
 - Endpoint `POST /users` (**ADMIN only**)
 
 ---
@@ -194,62 +164,68 @@ Setelah login sebagai admin, pembuatan user dilakukan lewat:
 1) Jalankan DB + Backend  
 2) Jalankan Frontend  
 3) Login sebagai **ADMIN** (akun seed)  
-4) Buat akun **USER** dari Admin Panel  
+4) Buat akun **USER** dari menu **Users (Admin)**  
 5) Login sebagai USER → upload dokumen  
 6) USER request delete/replace  
 7) ADMIN buka Approvals → approve/reject  
-8) USER melihat notifikasi + status dokumen berubah
+8) USER melihat notifikasi + status dokumen berubah  
+9) Download dokumen via tombol **Download (Secure)**
 
 ---
 
-## Endpoint Ringkas (lihat detail resmi di Swagger)
+## Endpoint Ringkas (sesuai controller)
 
-> Detail resmi dan parameter lengkap lihat Swagger: `http://localhost:3000/docs`
+> Detail resmi lihat Swagger: `http://localhost:3000/docs`
 
-**Auth**
-- `POST /auth/login` → login & mendapatkan JWT
+### Auth
+- `POST /auth/login` → login & mendapatkan JWT (rate-limited)
+- `GET /auth/me` → payload user saat ini (JWT)
 
-**Users (ADMIN only)**
+### Users (ADMIN only)
 - `POST /users` → create user
 
-**Documents**
-- `GET /documents?q=&page=&limit=` → list + search + pagination (JWT)
-- `POST /documents` → upload dokumen (multipart/form-data, JWT)
+### Documents (JWT required)
+- `GET /documents?q=&page=&limit=` → list + search + pagination
+- `GET /documents/:id` → detail doc
+- `POST /documents` → upload dokumen (multipart, PDF/DOCX only, max 10MB)
+- `GET /documents/:id/download` → **secure download** (JWT + authorization)
+- `POST /documents/:id/request-delete` → request delete (owner/admin)
+- `POST /documents/:id/request-replace` → request replace (multipart, PDF/DOCX only)
 
-**Approvals**
-- `POST /approvals/delete-request` → request delete (USER)
-- `POST /approvals/replace-request` → request replace (USER)
-- `POST /approvals/:id/approve` → approve (ADMIN)
-- `POST /approvals/:id/reject` → reject (ADMIN)
+### Approvals (ADMIN only)
+- `GET /approvals/requests` → list request PENDING (admin only)
+- `POST /approvals/requests/:id/approve` → approve request (DELETE/REPLACE)
+- `POST /approvals/requests/:id/reject` → reject request (DELETE/REPLACE)
 
-**Notifications**
-- `GET /notifications` → list notifikasi user (JWT)
+### Notifications (JWT required)
+- `GET /notifications` → list my notifications
+- `GET /notifications/me` → list my notifications (alias)
+- `POST /notifications/:id/read` → mark as read
 
 ---
 
 ## Access Control (USER vs ADMIN)
 
-### USER (tidak bisa eksekusi)
+### USER
 USER bisa:
 - Login
 - Upload dokumen
-- List dokumen
-- Membuat request **DELETE/REPLACE** → status **PENDING**
-- Melihat status request miliknya (PENDING/APPROVED/REJECTED)
-- Menerima notifikasi
+- List dokumen miliknya
+- Membuat request **DELETE/REPLACE** (dokumen lock ke status PENDING)
+- Menerima & membaca notifikasi
+- Download dokumen miliknya via endpoint secure
 
 USER tidak bisa:
 - Approve/reject request
-- Eksekusi delete/replace (menghapus file / mengganti `fileUrl`)
-- Melihat approval queue seluruh user
+- Melihat approval queue semua user
 
-### ADMIN (bisa memutuskan & eksekusi)
+### ADMIN
 ADMIN bisa:
 - Membuat user baru (Opsi A)
-- Melihat semua request **PENDING** (approval queue)
+- Melihat semua request **PENDING**
 - Approve/reject
-- Eksekusi aksi sensitif (delete file/dokumen, update `fileUrl` replace)
-- Audit & monitoring (opsional)
+- Download semua dokumen (secure download)
+- Aksi sensitif (delete/replace) dieksekusi oleh backend saat approve
 
 ---
 
@@ -258,10 +234,8 @@ ADMIN bisa:
 ### 0) Bootstrap Admin (Seed)
 ```mermaid
 flowchart LR
-  %% Styles
   classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
   classDef process fill:#1f2937,stroke:#94a3b8,color:#fff;
-  classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
   Dev[Developer]:::actor -->|Run seed| Seed[Prisma Seed]:::process
@@ -272,154 +246,73 @@ flowchart LR
 ### 1) Admin Create User (bukan register publik)
 ```mermaid
 flowchart LR
-  %% Styles
   classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
   classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
   classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  subgraph ADMIN[Admin]
-    A[ADMIN]:::actor
-  end
-
-  subgraph FE[Frontend UI]
-    UI[Admin Panel]:::ui
-  end
-
-  subgraph BE[Backend API]
-    API[API]:::api
-  end
-
-  DB[(Database)]:::db
-
-  A -->|Login| UI
-  UI -->|POST /auth/login| API
-  API -->|JWT token| UI
-
-  A -->|Create User| UI
-  UI -->|POST /users<br/>ADMIN only| API
-  API -->|Hash + Create user| DB
-  DB -->|User profile| API
+  A[ADMIN]:::actor --> UI[Admin Panel]:::ui
+  UI -->|POST /users (ADMIN)| API[Backend API]:::api
+  API --> DB[(Database)]:::db
+  DB --> API
   API --> UI
 ```
 
 ### 2) Upload Document
 ```mermaid
 flowchart LR
-  %% Styles
   classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
   classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
   classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  subgraph USER[User]
-    U[USER]:::actor
-  end
-
-  subgraph FE[Frontend UI]
-    UI[Documents Page]:::ui
-  end
-
-  subgraph BE[Backend API]
-    API[API]:::api
-  end
-
-  FS[(File Storage)]:::store
-  DB[(Database)]:::db
-
-  U -->|Choose file| UI
-  UI -->|POST /documents<br/>multipart + JWT| API
-  API -->|Validate size/type| API
-  API -->|Save file| FS
-  API -->|Save metadata| DB
-  DB -->|Document data| API
+  U[USER]:::actor --> UI[Documents Page]:::ui
+  UI -->|POST /documents (multipart + JWT)| API[Backend API]:::api
+  API -->|Validate type/size| API
+  API --> FS[(uploads/)]:::store
+  API --> DB[(Database)]:::db
+  DB --> API
   API --> UI
 ```
 
 ### 3) Approval — DELETE
 ```mermaid
 flowchart LR
-  %% Styles
   classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
   classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
   classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  subgraph USER[User]
-    U[USER]:::actor
-  end
+  U[USER]:::actor --> UI[UI]:::ui
+  UI -->|POST /documents/:id/request-delete| API[Backend API]:::api
+  API --> DB[(Database)]:::db
 
-  subgraph ADMIN[Admin]
-    A[ADMIN]:::actor
-  end
-
-  subgraph FE[Frontend UI]
-    UI[UI]:::ui
-  end
-
-  subgraph BE[Backend API]
-    API[API]:::api
-  end
-
-  FS[(File Storage)]:::store
-  DB[(Database)]:::db
-
-  U -->|Request delete| UI
-  UI -->|POST /approvals/delete-request| API
-  API -->|Create approval<br/>PENDING| DB
-
-  A -->|Open queue| UI
-  UI -->|POST /approvals/:id/approve| API
-
-  API -->|Delete file + doc| FS
-  API -->|Update approval<br/>APPROVED| DB
-  API -->|Create notification| DB
-  DB -->|Notify user| U
+  A[ADMIN]:::actor --> UI
+  UI -->|POST /approvals/requests/:id/approve| API
+  API --> FS[(uploads/)]:::store
+  API --> DB
 ```
 
 ### 4) Approval — REPLACE
 ```mermaid
 flowchart LR
-  %% Styles
   classDef actor fill:#2b2b2b,stroke:#999,color:#fff;
   classDef ui fill:#3a2a12,stroke:#f59e0b,color:#fff;
   classDef api fill:#0b3a53,stroke:#38bdf8,color:#fff;
   classDef store fill:#0f2f2a,stroke:#34d399,color:#fff;
   classDef db fill:#2a1f3d,stroke:#a78bfa,color:#fff;
 
-  subgraph USER[User]
-    U[USER]:::actor
-  end
+  U[USER]:::actor --> UI[UI]:::ui
+  UI -->|POST /documents/:id/request-replace (multipart)| API[Backend API]:::api
+  API --> FS[(uploads/)]:::store
+  API --> DB[(Database)]:::db
 
-  subgraph ADMIN[Admin]
-    A[ADMIN]:::actor
-  end
-
-  subgraph FE[Frontend UI]
-    UI[UI]:::ui
-  end
-
-  subgraph BE[Backend API]
-    API[API]:::api
-  end
-
-  FS[(File Storage)]:::store
-  DB[(Database)]:::db
-
-  U -->|Request replace| UI
-  UI -->|POST /approvals/replace-request| API
-  API -->|Store new file<br/>pending| FS
-  API -->|Create approval<br/>PENDING| DB
-
-  A -->|Open queue| UI
-  UI -->|POST /approvals/:id/approve| API
-
-  API -->|Update document<br/>fileUrl| DB
-  API -->|Update approval<br/>APPROVED| DB
-  API -->|Create notification| DB
-  DB -->|Notify user| U
+  A[ADMIN]:::actor --> UI
+  UI -->|POST /approvals/requests/:id/approve| API
+  API -->|Update doc + cleanup old file| FS
+  API --> DB
 ```
 
 ---
@@ -427,32 +320,31 @@ flowchart LR
 ## System Design Questions
 
 ### 1) How to handle large file uploads?
-- Disk storage (hindari memory) + limit ukuran + validasi mime-type
+- Disk storage + limit ukuran + validasi mime-type
 - Chunk/resumable upload (opsional)
-- Object storage + pre-signed URL (S3/MinIO) untuk skala besar
+- Object storage + pre-signed URL (S3/MinIO)
 - Simpan metadata (ukuran, hash/checksum) + (opsional) antivirus scanning
 
 ### 2) How to avoid lost updates when replacing documents?
 - Batasi 1 request PENDING per dokumen
-- Gunakan transaction saat approve: update document + approval + notification atomik
-- Optimistic concurrency (kolom `version`/`updatedAt`) → return 409 jika konflik
+- Transaction saat approve: update document + approval + notification atomik
+- Optimistic concurrency (kolom `version`/`updatedAt`) → 409 jika konflik
 
 ### 3) How to design notification system for scalability?
-- Mulai dari in-app notification tersimpan di DB
+- Mulai dari in-app notification di DB
 - Outbox pattern + worker
-- Message broker (RabbitMQ/Kafka/Redis Streams) untuk skala tinggi
-- Idempotency (eventId) untuk mencegah double notify
+- Message broker (RabbitMQ/Kafka/Redis Streams)
+- Idempotency (eventId)
 
 ### 4) How to secure file access?
 - Jangan expose folder uploads publik tanpa auth
 - Download via endpoint terproteksi (JWT + authorization)
 - Jika object storage: pre-signed URL TTL pendek
-- Validasi upload (type/size), rate limit, audit log (opsional)
+- Validasi upload (type/size), rate limit, audit log
 
 ### 5) How to structure services for microservice migration?
 - Modular monolith: Auth, Users, Documents, Approvals, Notifications
-- Batasi akses lintas modul
-- Definisikan domain events (DocumentReplaced, ApprovalApproved, dst.)
+- Domain events (DocumentReplaced, ApprovalApproved, dst.)
 - Kandidat microservice pertama: Notifications → Approvals → Documents
 
 ---
@@ -460,12 +352,11 @@ flowchart LR
 ## Troubleshooting
 
 ### 404 “Cannot GET /docs”
-Pastikan backend berjalan dan buka:
-- `http://localhost:3000/docs`
+- Pastikan backend berjalan
+- Buka `http://localhost:3000/docs`
 
 ### CORS error saat frontend akses backend
-- Pastikan `CORS_ORIGIN=http://localhost:3001` (backend)
-- Pastikan FE benar-benar berjalan di `http://localhost:3001`
+- Pastikan `CORS_ORIGIN` mengandung origin frontend
 - Restart backend setelah ubah `.env`
 
 ### Prisma error / client mismatch
@@ -477,7 +368,7 @@ npx prisma migrate dev
 ---
 
 ## Author
-**Ichsan**
+**Ichsan**  
 https://github.com/ichsanx/dms-fullstack-cybermax-v6
 
 ---
