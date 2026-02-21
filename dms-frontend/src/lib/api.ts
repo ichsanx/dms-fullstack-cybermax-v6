@@ -18,7 +18,15 @@ async function readBody(res: Response) {
   }
 }
 
-async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
+type ApiFetchOptions = RequestInit & {
+  /**
+   * Kalau true, return Response mentah (dipakai untuk download file/blob).
+   * Default: false (return parsed json/text).
+   */
+  rawResponse?: boolean;
+};
+
+async function apiFetch<T = any>(path: string, init?: ApiFetchOptions): Promise<T> {
   const url = `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 
   const headers = new Headers(init?.headers || {});
@@ -30,7 +38,8 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const res = await fetch(url, { ...init, headers, cache: "no-store" });
+  const { rawResponse, ...rest } = init || {};
+  const res = await fetch(url, { ...rest, headers, cache: "no-store" });
 
   if (!res.ok) {
     const body = await readBody(res);
@@ -46,6 +55,8 @@ async function apiFetch<T = any>(path: string, init?: RequestInit): Promise<T> {
     throw err;
   }
 
+  if (rawResponse) return res as unknown as T;
+
   return (await readBody(res)) as T;
 }
 
@@ -57,10 +68,17 @@ function normalizePaginated<T>(data: any): Paginated<T> {
   return { items: [] };
 }
 
-export function buildFileHref(fileUrl?: string) {
-  if (!fileUrl) return "#";
-  if (fileUrl.startsWith("http")) return fileUrl;
-  return `${API_BASE_URL}${fileUrl}`;
+/**
+ * ⚠️ DEPRECATED
+ * Dulu dipakai untuk open /uploads/... secara publik.
+ * Sekarang file harus di-download lewat endpoint secure:
+ * GET /documents/:id/download (JWT required).
+ *
+ * Aku biarkan function-nya supaya build tidak rusak kalau masih ada import lama,
+ * tapi lebih baik jangan dipakai lagi.
+ */
+export function buildFileHref(_fileUrl?: string) {
+  return "#";
 }
 
 /** ======================
@@ -78,6 +96,23 @@ export async function login(email: string, password: string) {
 
 export async function me() {
   return apiFetch<any>("/auth/me");
+}
+
+/** ======================
+ * USERS (ADMIN)
+ * ====================== */
+export type CreateUserPayload = {
+  email: string;
+  password: string;
+  role?: "USER" | "ADMIN";
+};
+
+export async function createUser(payload: CreateUserPayload) {
+  return apiFetch<any>("/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 /** ======================
@@ -153,6 +188,21 @@ export async function requestReplace(docId: string, file: File) {
   });
 }
 
+/**
+ * ✅ Secure download helper
+ * Download file via JWT endpoint: GET /documents/:id/download
+ *
+ * Cara pakai:
+ * await downloadDocumentFile(doc.id, `${doc.title}_v${doc.version}.pdf`)
+ */
+export async function downloadDocumentFile(docId: string) {
+  // return Response mentah supaya caller bisa .blob()
+  return apiFetch<Response>(`/documents/${docId}/download`, {
+    method: "GET",
+    rawResponse: true,
+  });
+}
+
 /** ======================
  * APPROVALS
  * ====================== */
@@ -198,4 +248,46 @@ export async function listMyNotifications() {
 
 export async function markNotificationRead(id: string) {
   return apiFetch<any>(`/notifications/${id}/read`, { method: "POST" });
+}
+
+/** ======================
+ * DASHBOARD SUMMARY
+ * ====================== */
+export type DashboardSummary = {
+  documentsTotal?: number;
+  unreadNotifications?: number;
+  pendingApprovals?: number;
+};
+
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  const summary: DashboardSummary = {};
+
+  // 1) total documents (ambil dari paginated result)
+  try {
+    const docs = await listDocuments({ page: 1, limit: 1 });
+    summary.documentsTotal = docs.total ?? (docs.items?.length ?? 0);
+  } catch {
+    // ignore
+  }
+
+  // 2) unread notifications (count dari list)
+  try {
+    const notifs = await listMyNotifications();
+    summary.unreadNotifications = (notifs || []).filter((n) => !n.isRead).length;
+  } catch {
+    // ignore
+  }
+
+  // 3) pending approvals (admin only)
+  try {
+    const reqs = await listApprovalRequests();
+    summary.pendingApprovals = (reqs || []).filter((r) => r.status === "PENDING").length;
+  } catch (e: any) {
+    // kalau user biasa, backend akan 403 -> ignore
+    if (e?.status !== 403) {
+      // ignore anyway
+    }
+  }
+
+  return summary;
 }

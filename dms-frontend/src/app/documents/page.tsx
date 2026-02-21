@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
-  buildFileHref,
+  API_BASE_URL,
   listDocuments,
   uploadDocument,
   requestDelete,
@@ -24,6 +24,14 @@ function fmtDate(iso?: string) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
+}
+
+function sanitizeFilename(name: string) {
+  return (name || "document")
+    .trim()
+    .replace(/[\/\\?%*:|"<>]/g, "-")
+    .replace(/\s+/g, " ")
+    .slice(0, 120);
 }
 
 export default function DocumentsPage() {
@@ -119,7 +127,11 @@ export default function DocumentsPage() {
     if ((d.status || "").includes("PENDING"))
       return alert("Dokumen ini sedang pending. Tunggu approval selesai.");
 
-    if (!confirm(`Request Delete?\n\n${d.title} (v${d.version ?? 1})\nID: ${d.id}`))
+    if (
+      !confirm(
+        `Request Delete?\n\n${d.title} (v${d.version ?? 1})\nID: ${d.id}`
+      )
+    )
       return;
 
     setErr("");
@@ -171,6 +183,55 @@ export default function DocumentsPage() {
   function onSearch() {
     setPage(1);
     refresh();
+  }
+
+  async function downloadDocument(d: DocumentItem) {
+    setErr("");
+    try {
+      const token = getToken();
+      if (!token) return r.replace("/login");
+
+      // ✅ pakai API_BASE_URL yang sudah sesuai dengan env project kamu
+      const url = `${API_BASE_URL}/documents/${d.id}/download`;
+
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.status === 401) return r.replace("/login");
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Download failed (${res.status})`);
+      }
+
+      const blob = await res.blob();
+
+      // optional: coba tentukan ekstensi dari mime type (kalau backend tidak mengirim filename)
+      const extFromType =
+        blob.type === "application/pdf"
+          ? ".pdf"
+          : blob.type ===
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ? ".docx"
+          : "";
+
+      const filename = `${sanitizeFilename(d.title)}_v${d.version ?? 1}${
+        extFromType || ""
+      }`;
+
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e: any) {
+      setErr(e?.message || "Gagal download");
+    }
   }
 
   return (
@@ -305,7 +366,6 @@ export default function DocumentsPage() {
             <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
               {shownItems.map((d) => {
                 const disabledPending = (d.status || "").includes("PENDING");
-                const fileHref = buildFileHref(d.fileUrl);
 
                 return (
                   <div key={d.id} className="card" style={{ padding: 14 }}>
@@ -328,13 +388,13 @@ export default function DocumentsPage() {
                     </div>
 
                     <div className="small" style={{ marginTop: 6, opacity: 0.9 }}>
-                      FileUrl: {d.fileUrl || "-"}
+                      FileUrl (server): {d.fileUrl || "-"}
                     </div>
 
                     <div className="row" style={{ marginTop: 10 }}>
-                      <a href={fileHref} target="_blank" rel="noreferrer">
-                        Open file
-                      </a>
+                      <button type="button" onClick={() => downloadDocument(d)}>
+                        Download (Secure)
+                      </button>
 
                       <button type="button" onClick={() => copy(d.id)}>
                         Copy ID

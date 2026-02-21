@@ -1,13 +1,19 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { listMyNotifications, markNotificationRead, type NotificationItem } from "@/lib/api";
+import {
+  listMyNotifications,
+  markNotificationRead,
+  type NotificationItem,
+} from "@/lib/api";
 import { getToken } from "@/lib/auth";
 
 export default function NotificationsPage() {
   const r = useRouter();
+  const pathname = usePathname();
+
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -38,9 +44,13 @@ export default function NotificationsPage() {
   }
 
   async function onRead(id: string) {
+    setErr("");
     try {
       await markNotificationRead(id);
       await refresh();
+
+      // ✅ trigger AppShell badge refresh (pathname effect)
+      r.replace(pathname);
     } catch (e: any) {
       setErr(e?.body || e?.message || "Gagal mark read");
     }
@@ -59,14 +69,22 @@ export default function NotificationsPage() {
         {loading ? (
           <div style={{ marginTop: 12 }}>Loading...</div>
         ) : items.length === 0 ? (
-          <div style={{ marginTop: 12 }} className="small">Belum ada notifikasi.</div>
+          <div style={{ marginTop: 12 }} className="small">
+            Belum ada notifikasi.
+          </div>
         ) : (
           <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
             {items.map((n) => (
-              <div key={n.id} className="card" style={{ padding: 14, opacity: n.isRead ? 0.75 : 1 }}>
+              <div
+                key={n.id}
+                className="card"
+                style={{ padding: 14, opacity: n.isRead ? 0.75 : 1 }}
+              >
                 <div className="row" style={{ justifyContent: "space-between" }}>
                   <b>{n.isRead ? "READ" : "UNREAD"}</b>
-                  <span className="small">{new Date(n.createdAt).toLocaleString()}</span>
+                  <span className="small">
+                    {new Date(n.createdAt).toLocaleString()}
+                  </span>
                 </div>
                 <div style={{ marginTop: 8 }}>{n.message}</div>
                 {!n.isRead && (

@@ -19,6 +19,7 @@ export default function LoginPage() {
 
     try {
       clearAuth();
+
       const res = await login(email, password);
       setToken(res.access_token);
 
@@ -26,7 +27,8 @@ export default function LoginPage() {
       setRole(payload.role || "");
       setEmail(payload.email || "");
 
-      r.replace("/");
+      // redirect setelah login
+      r.replace("/documents");
     } catch (e: any) {
       const msg =
         e?.body?.message ||
@@ -40,7 +42,14 @@ export default function LoginPage() {
   }
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        padding: 24,
+      }}
+    >
       <div className="card" style={{ width: 420 }}>
         <h1 style={{ marginTop: 0 }}>Login</h1>
 
@@ -67,7 +76,8 @@ export default function LoginPage() {
         {err && <pre style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>{err}</pre>}
 
         <p className="small" style={{ marginTop: 14 }}>
-          Buat user via Swagger: <code>{API_BASE_URL}/docs</code> → <b>POST /auth/register</b>
+          Buat user via Swagger: <code>{API_BASE_URL}/docs</code> →{" "}
+          <b>POST /users</b> (ADMIN only)
         </p>
       </div>
     </main>

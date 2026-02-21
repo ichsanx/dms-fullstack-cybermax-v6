@@ -1,13 +1,20 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import { approveRequest, listApprovalRequests, rejectRequest, type ApprovalRequest } from "@/lib/api";
+import {
+  approveRequest,
+  listApprovalRequests,
+  rejectRequest,
+  type ApprovalRequest,
+} from "@/lib/api";
 import { getRole, getToken } from "@/lib/auth";
 
 export default function ApprovalsPage() {
   const r = useRouter();
+  const pathname = usePathname();
+
   const [items, setItems] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
@@ -49,9 +56,13 @@ export default function ApprovalsPage() {
 
   async function onApprove(id: string) {
     if (!confirm("Approve request ini?")) return;
+    setErr("");
     try {
       await approveRequest(id);
       await refresh();
+
+      // ✅ trigger AppShell badge refresh
+      r.replace(pathname);
     } catch (e: any) {
       setErr(e?.body || e?.message || "Approve gagal");
     }
@@ -59,9 +70,13 @@ export default function ApprovalsPage() {
 
   async function onReject(id: string) {
     if (!confirm("Reject request ini?")) return;
+    setErr("");
     try {
       await rejectRequest(id);
       await refresh();
+
+      // ✅ trigger AppShell badge refresh
+      r.replace(pathname);
     } catch (e: any) {
       setErr(e?.body || e?.message || "Reject gagal");
     }
@@ -82,7 +97,9 @@ export default function ApprovalsPage() {
         {loading ? (
           <div style={{ marginTop: 12 }}>Loading...</div>
         ) : pending.length === 0 ? (
-          <div style={{ marginTop: 12 }} className="small">Tidak ada pending.</div>
+          <div style={{ marginTop: 12 }} className="small">
+            Tidak ada pending.
+          </div>
         ) : (
           <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
             {pending.map((x) => (
@@ -94,12 +111,16 @@ export default function ApprovalsPage() {
 
                 <div className="small" style={{ marginTop: 6 }}>
                   Request ID: <b>{x.id}</b>{" "}
-                  {copied === x.id && <span style={{ color: "var(--ok)" }}>Copied!</span>}
+                  {copied === x.id && (
+                    <span style={{ color: "var(--ok)" }}>Copied!</span>
+                  )}
                 </div>
 
                 <div className="small" style={{ marginTop: 6 }}>
                   Doc ID: <b>{x.documentId}</b>{" "}
-                  {copied === x.documentId && <span style={{ color: "var(--ok)" }}>Copied!</span>}
+                  {copied === x.documentId && (
+                    <span style={{ color: "var(--ok)" }}>Copied!</span>
+                  )}
                 </div>
 
                 <div className="row" style={{ marginTop: 10 }}>

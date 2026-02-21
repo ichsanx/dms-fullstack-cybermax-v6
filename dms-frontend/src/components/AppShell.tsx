@@ -3,8 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { clearAuth, getEmail, getRole, getToken } from "@/lib/auth";
+import { listApprovalRequests, listMyNotifications } from "@/lib/api";
 
-type NavItem = { label: string; href: string; adminOnly?: boolean };
+type NavItem = {
+  label: string;
+  href: string;
+  adminOnly?: boolean;
+  badge?: number;
+};
 
 export default function AppShell({
   title,
@@ -20,21 +26,78 @@ export default function AppShell({
   const [role, setRoleState] = useState("");
   const [email, setEmailState] = useState("");
 
+  const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
+  const [pendingApprovalCount, setPendingApprovalCount] = useState<number>(0);
+
   useEffect(() => {
     setTokenState(getToken());
     setRoleState(getRole());
     setEmailState(getEmail());
   }, [pathname]);
 
+  // Fetch sidebar badges (unread notif + pending approvals)
+  useEffect(() => {
+    const t = getToken();
+    const currentRole = getRole();
+
+    if (!t) {
+      setUnreadNotifCount(0);
+      setPendingApprovalCount(0);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        // notifications count
+        const notifs = await listMyNotifications();
+        const unread = (notifs || []).filter((n) => !n.isRead).length;
+        if (!cancelled) setUnreadNotifCount(unread);
+      } catch {
+        if (!cancelled) setUnreadNotifCount(0);
+      }
+
+      if (currentRole === "ADMIN") {
+        try {
+          const reqs = await listApprovalRequests();
+          const pending = (reqs || []).filter((x) => x.status === "PENDING").length;
+          if (!cancelled) setPendingApprovalCount(pending);
+        } catch {
+          if (!cancelled) setPendingApprovalCount(0);
+        }
+      } else {
+        if (!cancelled) setPendingApprovalCount(0);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
   const nav: NavItem[] = useMemo(
     () => [
       { label: "Dashboard", href: "/" },
       { label: "Documents", href: "/documents" },
-      { label: "Notifications", href: "/notifications" },
-      { label: "Approvals (Admin)", href: "/approvals", adminOnly: true },
+      {
+        label: "Notifications",
+        href: "/notifications",
+        badge: unreadNotifCount,
+      },
+
+      // ✅ ADMIN area
+      { label: "Users (Admin)", href: "/users", adminOnly: true },
+      {
+        label: "Approvals (Admin)",
+        href: "/approvals",
+        adminOnly: true,
+        badge: pendingApprovalCount,
+      },
+
       { label: "Test API", href: "/test-api" },
     ],
-    []
+    [unreadNotifCount, pendingApprovalCount]
   );
 
   const visible = nav.filter((x) => (x.adminOnly ? role === "ADMIN" : true));
@@ -52,7 +115,9 @@ export default function AppShell({
         <div className="small" style={{ marginBottom: 14 }}>
           {token ? (
             <>
-              <div><b>{email || "-"}</b></div>
+              <div>
+                <b>{email || "-"}</b>
+              </div>
               <div>Role: {role || "-"}</div>
             </>
           ) : (
@@ -60,16 +125,36 @@ export default function AppShell({
           )}
         </div>
 
-        {visible.map((x) => (
-          <button
-            key={x.href}
-            className={`navbtn ${pathname === x.href ? "active" : ""}`}
-            onClick={() => r.push(x.href)}
-            type="button"
-          >
-            {x.label}
-          </button>
-        ))}
+        {visible.map((x) => {
+          const isActive = pathname === x.href;
+          const badge = x.badge ?? 0;
+
+          return (
+            <button
+              key={x.href}
+              className={`navbtn ${isActive ? "active" : ""}`}
+              onClick={() => r.push(x.href)}
+              type="button"
+              style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}
+            >
+              <span>{x.label}</span>
+
+              {badge > 0 && (
+                <span
+                  className="badge"
+                  title="Count"
+                  style={{
+                    minWidth: 28,
+                    textAlign: "center",
+                    fontWeight: 900,
+                  }}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
 
         <div style={{ marginTop: 16 }}>
           {token && (
