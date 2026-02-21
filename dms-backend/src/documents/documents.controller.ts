@@ -39,13 +39,26 @@ function fileName(req: any, file: any, cb: any) {
   cb(null, unique + extname(file.originalname));
 }
 
-function sanitizeFilename(name: string) {
-  // replace karakter yang umum bikin masalah di file system / header
-  return name
-    .trim()
-    .replace(/[\/\\?%*:|"<>]/g, '-') // windows reserved
-    .replace(/\s+/g, ' ')
-    .slice(0, 120);
+// ✅ Allow only PDF / DOCX
+function fileFilter(req: any, file: Express.Multer.File, cb: any) {
+  const allowed = new Set([
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ]);
+
+  // fallback by extension (kadang mimetype kosong dari browser tertentu)
+  const ext = (extname(file.originalname) || '').toLowerCase();
+  const extAllowed = ext === '.pdf' || ext === '.docx';
+
+  const ok = allowed.has(file.mimetype) || extAllowed;
+
+  if (!ok) {
+    return cb(
+      new BadRequestException('Only PDF/DOCX files are allowed (max 10MB)'),
+      false,
+    );
+  }
+  return cb(null, true);
 }
 
 @ApiTags('Documents')
@@ -90,15 +103,9 @@ export class DocumentsController {
   @Get(':id/download')
   @ApiOperation({ summary: 'Download document file (secure, JWT required)' })
   @ApiParam({ name: 'id', description: 'Document ID' })
-  async download(
-    @Req() req: any,
-    @Param('id') id: string,
-    @Res() res: Response,
-  ) {
-    // akses kontrol tetap lewat service (ADMIN boleh semua, USER hanya miliknya)
+  async download(@Req() req: any, @Param('id') id: string, @Res() res: Response) {
     const doc: any = await this.docs.getById(req.user, id);
 
-    // doc.fileUrl format: "/uploads/filename.ext"
     const storedFilename = path.basename(doc.fileUrl);
     const fullPath = path.join(process.cwd(), 'uploads', storedFilename);
 
@@ -106,9 +113,13 @@ export class DocumentsController {
       return res.status(404).json({ message: 'File not found on server' });
     }
 
-    // bikin nama file yang enak: "<title>_v<version>.<ext>"
+    // download name friendly
     const ext = path.extname(storedFilename) || '';
-    const safeTitle = sanitizeFilename(doc.title || 'document');
+    const safeTitle = String(doc.title || 'document')
+      .trim()
+      .replace(/[\/\\?%*:|"<>]/g, '-')
+      .replace(/\s+/g, ' ')
+      .slice(0, 120);
     const downloadName = `${safeTitle}_v${doc.version}${ext}`;
 
     return res.download(fullPath, downloadName);
@@ -132,10 +143,8 @@ export class DocumentsController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: fileName,
-      }),
+      storage: diskStorage({ destination: './uploads', filename: fileName }),
+      fileFilter,
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }),
   )
@@ -145,26 +154,21 @@ export class DocumentsController {
     @UploadedFile() file?: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('File is required');
-
     const fileUrl = `/uploads/${file.filename}`;
     return this.docs.create(req.user.sub, dto, fileUrl);
   }
 
-  // ✅ REQUEST DELETE (bukan delete langsung)
+  // ✅ REQUEST DELETE
   @Post(':id/request-delete')
-  @ApiOperation({
-    summary: 'Request delete document (USER creates request, ADMIN approves)',
-  })
+  @ApiOperation({ summary: 'Request delete document (USER creates request, ADMIN approves)' })
   @ApiParam({ name: 'id', description: 'Document ID' })
   async requestDelete(@Req() req: any, @Param('id') id: string) {
     return this.docs.requestDelete(req.user, id);
   }
 
-  // ✅ REQUEST REPLACE (upload file baru, menunggu approval)
+  // ✅ REQUEST REPLACE
   @Post(':id/request-replace')
-  @ApiOperation({
-    summary: 'Request replace document file (USER creates request, ADMIN approves)',
-  })
+  @ApiOperation({ summary: 'Request replace document file (USER creates request, ADMIN approves)' })
   @ApiParam({ name: 'id', description: 'Document ID' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -181,10 +185,8 @@ export class DocumentsController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: fileName,
-      }),
+      storage: diskStorage({ destination: './uploads', filename: fileName }),
+      fileFilter,
       limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     }),
   )

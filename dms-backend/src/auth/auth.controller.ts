@@ -14,28 +14,22 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  // ✅ preflight handler (kadang diperlukan untuk browser)
   @Options('*')
   @HttpCode(204)
   options(@Res() res: Response) {
     return res.send();
   }
 
-  /**
-   * ❌ Register publik DIHAPUS
-   * Sesuai requirement: user dibuat oleh ADMIN (misal lewat POST /users) atau lewat seed.
-   *
-   * Kalau FE kamu masih memanggil /auth/register, hapus flow itu di frontend.
-   */
-
-  // ✅ Login HARUS 200 biar FE yang strict gak gagal
+  // ✅ Rate limit login: 10 request / 3 menit per IP
   @Post('login')
+  @Throttle({ default: { ttl: 180, limit: 10 } })
   @ApiOperation({ summary: 'Login and get access token' })
   @ApiBody({ type: LoginDto })
   @HttpCode(200)
